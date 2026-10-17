@@ -156,12 +156,13 @@ class LLMConnector:
                 )
 
         # 2. Determine Question Intent Categories
-        is_deadline_q = any(w in q_lower for w in ["deadline", "time", "days", "when", "period", "date", "limit"])
-        is_money_q = any(w in q_lower for w in ["money", "amount", "rupees", "rs", "pay", "sum", "cheque", "fee", "cost"])
-        is_law_q = any(w in q_lower for w in ["section", "law", "act", "offence", "crime", "provision", "statute", "legal"])
-        is_allegation_q = any(w in q_lower for w in ["claim", "allegation", "accuse", "fraud", "fault", "guilty", "alleged", "dishonest"])
-        is_action_q = any(w in q_lower for w in ["what should i do", "what to do", "next step", "respond", "reply", "action", "advise"])
-        is_parties_q = any(w in q_lower for w in ["who", "parties", "sender", "recipient", "client", "advocate", "person"])
+        is_deadline_q = any(w in q_lower for w in ["deadline", "when", "days", "period", "within", "how much time", "date limit"])
+        is_money_q = any(w in q_lower for w in ["money", "amount", "rupees", "rs.", "pay", "sum", "cheque amount", "fee", "cost"])
+        is_law_q = any(w in q_lower for w in ["section", "law", "act", "offence", "crime", "provision", "statute", "legal", "punishment"])
+        is_allegation_q = any(w in q_lower for w in ["claim", "allegation", "accuse", "fraud", "fault", "guilty", "alleged", "dishonest", "cheat"])
+        is_action_q = any(w in q_lower for w in ["what should i do", "what to do", "next step", "how to respond", "advice"])
+        is_contract_clause_q = any(w in q_lower for w in ["clause", "agreement", "contract", "arbitration", "term", "dispute resolution", "require"])
+        is_parties_q = any(p in q_lower for p in ["who is", "who are", "parties involved", "identity of", "names of", "sender of"])
 
         doc_cits = [c for c in citations if c.source_type == SourceType.UPLOADED_DOCUMENT]
         statute_cits = [c for c in citations if c.source_type == SourceType.STATUTE]
@@ -169,8 +170,20 @@ class LLMConnector:
 
         sections_text: List[str] = []
 
-        # Section A: Document Findings (Fact vs Allegation distinction)
-        if is_deadline_q:
+        # Section A: Document Findings (Fact vs Allegation vs Contractual Provision)
+        if is_contract_clause_q and doc_cits:
+            best_doc = doc_cits[0]
+            sections_text.append(
+                f"**Contractual Provision & Requirement**: Under **{best_doc.title}**, the document stipulates:\n"
+                f"> \"{best_doc.quote_snippet}\" {best_doc.citation_id}."
+            )
+            if len(doc_cits) > 1 and doc_cits[1].reference_pointer != best_doc.reference_pointer:
+                sec_doc = doc_cits[1]
+                sections_text.append(
+                    f"**Cross-Document Context ({sec_doc.title})**: \"{sec_doc.quote_snippet}\" {sec_doc.citation_id}."
+                )
+
+        elif is_deadline_q:
             if epistemic_check.demands_obligations:
                 deadlines_found = [d for d in epistemic_check.demands_obligations if any(w in d.lower() for w in ["day", "period", "within", "date", "time"])]
                 if deadlines_found:
@@ -181,6 +194,8 @@ class LLMConnector:
                     )
                 else:
                     sections_text.append(f"**Document Requirements**: {epistemic_check.demands_obligations[0]}")
+            elif doc_cits:
+                sections_text.append(f"**Document Timeline / Deadline Reference**: \"{doc_cits[0].quote_snippet}\" {doc_cits[0].citation_id}.")
             else:
                 limitations.append("Specific numerical deadline was not explicitly stated in the retrieved document passages.")
 
@@ -192,6 +207,8 @@ class LLMConnector:
                     f"**Monetary Claim & Demand**: The document demands the following monetary remittance: "
                     f"\"{money_claims[0]}\" {cit_tag}."
                 )
+            elif doc_cits:
+                sections_text.append(f"**Monetary Reference**: \"{doc_cits[0].quote_snippet}\" {doc_cits[0].citation_id}.")
             else:
                 sections_text.append("No explicit monetary demand could be identified in the retrieved sections.")
 
@@ -203,14 +220,14 @@ class LLMConnector:
                     f"\"{epistemic_check.allegations[0]}\" {cit_tag}.\n"
                     f"*Important note: This represents an allegation made by the sender, not an established judicial fact.*"
                 )
-            elif epistemic_check.explicit_facts:
-                sections_text.append(f"**Document Record**: \"{epistemic_check.explicit_facts[0]}\"")
+            elif doc_cits:
+                sections_text.append(f"**Document Record**: \"{doc_cits[0].quote_snippet}\" {doc_cits[0].citation_id}.")
 
         elif is_parties_q:
-            if epistemic_check.explicit_facts:
-                sections_text.append(f"**Involved Parties / Context**: \"{epistemic_check.explicit_facts[0]}\" {doc_cits[0].citation_id if doc_cits else ''}")
-            elif epistemic_check.demands_obligations:
-                sections_text.append(f"**Party Obligations**: {epistemic_check.demands_obligations[0]}")
+            if doc_cits:
+                sections_text.append(f"**Involved Parties / Context**: \"{doc_cits[0].quote_snippet}\" {doc_cits[0].citation_id}.")
+            elif epistemic_check.explicit_facts:
+                sections_text.append(f"**Involved Parties / Context**: \"{epistemic_check.explicit_facts[0]}\".")
 
         else:
             # General Question: provide best matching document passage
