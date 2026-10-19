@@ -42,10 +42,19 @@ def main() -> None:
         relevant = {str(value) for value in item.get("relevant_doc_ids", [])}
         if not query or not relevant:
             continue
+
         q_vector = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
-        scores = doc_vectors @ q_vector
-        top = np.argsort(scores)[::-1][:args.k]
-        ranked_ids = [doc_ids[int(i)] for i in top]
+        chunk_scores = doc_vectors @ q_vector
+        best_score_by_document = {}
+        for doc_id, score in zip(doc_ids, chunk_scores):
+            if doc_id and (doc_id not in best_score_by_document or score > best_score_by_document[doc_id]):
+                best_score_by_document[doc_id] = float(score)
+
+        ranked_ids = [
+            doc_id for doc_id, _ in sorted(
+                best_score_by_document.items(), key=lambda pair: pair[1], reverse=True
+            )[:args.k]
+        ]
         hits = [1 if doc_id in relevant else 0 for doc_id in ranked_ids]
         recall_values.append(len(set(ranked_ids) & relevant) / len(relevant))
         reciprocal_ranks.append(next((1 / rank for rank, hit in enumerate(hits, 1) if hit), 0.0))
